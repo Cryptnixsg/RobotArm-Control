@@ -1,0 +1,57 @@
+function sysCall_init()
+    -- Initialize handles
+    colorCam = sim.getObjectHandle("ColorCam")
+    efficientConveyor = sim.getObjectHandle("efficientConveyor")
+
+    -- Initialize state and conveyor speed
+    state = "Normal"
+    conveyorSpeed = 0.01 -- default conveyor speed, you can change this manually
+
+    -- Define RGB values for red and green blocks
+    redBlockColor = {217.6/255, 47.64/255, 0.0}
+    greenBlockColor = {91.16/255, 152.6/255, 0.0}
+end
+
+function detectBlockInCenter(color)
+    local imageBuffer, resX, resY = sim.getVisionSensorCharImage(colorCam)
+    local centerX, centerY = math.floor(resX / 2), math.floor(resY / 2)
+    local offset = 3 * (centerY * resX + centerX)
+
+    local r = imageBuffer:byte(offset + 1) / 255
+    local g = imageBuffer:byte(offset + 2) / 255
+    local b = imageBuffer:byte(offset + 3) / 255
+
+    return math.abs(r - color[1]) < 0.1 and math.abs(g - color[2]) < 0.1 and math.abs(b - color[3]) < 0.1
+end
+
+function sysCall_sensing()
+    if state == "Normal" then
+        if detectBlockInCenter(redBlockColor) then
+            state = "Reddetected"
+            sim.setStringSignal("blockColor", "Red")
+            print("Red block detected in center")
+        elseif detectBlockInCenter(greenBlockColor) then
+            state = "Greendetected"
+            sim.setStringSignal("blockColor", "Green")
+            print("Green block detected in center")
+        end
+    elseif state == "Reddetected" then
+        if not detectBlockInCenter(redBlockColor) then
+            state = "Normal"
+            sim.setStringSignal("blockColor", "Normal")
+        end
+    elseif state == "Greendetected" then
+        if not detectBlockInCenter(greenBlockColor) then
+            state = "Normal"
+            sim.setStringSignal("blockColor", "Normal")
+        end
+    end
+end
+
+function sysCall_actuation()
+    if state == "Normal" then
+        sim.writeCustomTableData(efficientConveyor, '__ctrl__', {vel = conveyorSpeed})
+    elseif state == "Reddetected" or state == "Greendetected" then
+        sim.writeCustomTableData(efficientConveyor, '__ctrl__', {vel = 0})
+    end
+end
