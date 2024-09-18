@@ -1,0 +1,127 @@
+sim = require 'sim'
+
+-- Function to set joint configurations
+function setJointConfig(config)
+    for i = 1, #jointHandles do
+        sim.setJointTargetPosition(jointHandles[i], config[i])
+    end
+end
+
+-- Function to control the gripper
+function controlGripper(state)
+    if state == "open" then
+        sim.setIntegerSignal('GripperBase_gripperClose', 0)
+    elseif state == "close" then
+        sim.setIntegerSignal('GripperBase_gripperClose', 1)
+    end
+end
+
+-- Function to move joints to the target configuration and check if all joints reached the target
+function moveToConfig(config)
+    local allReached = true
+    for i = 1, #jointHandles do
+        local currentPos = sim.getJointPosition(jointHandles[i])
+        local targetPos = config[i]
+        local speedFactor = 0.05 -- Decrease this value to reduce the joint speed further
+
+        -- Dynamically set the joint speed based on the distance to the target position
+        if math.abs(currentPos - targetPos) > 0.01 then
+            local velocity = math.abs(currentPos - targetPos) * speedFactor
+            sim.setJointTargetVelocity(jointHandles[i], velocity)
+            sim.setJointTargetPosition(jointHandles[i], targetPos)
+            allReached = false
+        end
+    end
+    return allReached
+end
+
+function sysCall_init()
+    self = sim.getObject('.')
+
+    -- Get handles for the joints
+    jointHandles = {
+        sim.getObjectHandle('joint1'),
+        sim.getObjectHandle('joint2'),
+        sim.getObjectHandle('joint3'),
+        sim.getObjectHandle('joint4')
+    }
+
+    -- Gripper handle
+    gripperHandle = sim.getObject(':/gripperClose_joint')
+
+    -- Default positions
+    defaultConfig = {0, 0, 0, 0}
+    -- Separate pick-up positions for Red and Green blocks
+    redPickUpConfig = {0.05, 90*math.pi/180, 30*math.pi/180, 14*math.pi/180}  -- Adjust X-axis for Red
+    greenPickUpConfig = {0, 90*math.pi/180, 30*math.pi/180, 14*math.pi/180}  -- Adjust X-axis for Green
+
+    -- Drop positions for Red and Green blocks
+    redConfig = {90*math.pi/180, 90*math.pi/180, 30*math.pi/180, 10*math.pi/180}
+    greenConfig = {-90*math.pi/180, 90*math.pi/180, 30*math.pi/180, 10*math.pi/180}
+
+    -- Set a low default speed for the joints
+    jointSpeed = 0.005 -- Slowed down movement speed
+    for i = 1, #jointHandles do
+        sim.setJointTargetVelocity(jointHandles[i], jointSpeed)
+    end
+
+    -- Initialize state
+    state = "Default"
+    setJointConfig(defaultConfig)
+    controlGripper("open")
+    waitTime = sim.getSimulationTime() + 0.5
+end
+
+function sysCall_actuation()
+    local command = sim.getStringSignal('blockColor')
+    if state == "Default" then
+        if command == "Red" then
+            state = "MoveToPickUp"
+            targetConfig = redPickUpConfig  -- Use red-specific config
+            nextState = "RedDetected"
+            sim.clearStringSignal('blockColor')
+        elseif command == "Green" then
+            state = "MoveToPickUp"
+            targetConfig = greenPickUpConfig  -- Use green-specific config
+            nextState = "GreenDetected"
+            sim.clearStringSignal('blockColor')
+        end
+    elseif state == "MoveToPickUp" then
+        if moveToConfig(targetConfig) then
+            state = "WaitForGripperClose"
+            controlGripper("close")
+            waitTime = sim.getSimulationTime() + 1
+        end
+    elseif state == "WaitForGripperClose" then
+        -- 3-second delay before moving to drop-off
+        if sim.getSimulationTime() >= waitTime + 3 then
+            if nextState == "RedDetected" then
+                targetConfig = redConfig
+            else
+                targetConfig = greenConfig
+            end
+            state = "MoveToDropOff"
+        end
+    elseif state == "MoveToDropOff" then
+        if moveToConfig(targetConfig) then
+            -- Open the gripper at both redConfig and greenConfig
+            controlGripper("open")
+            state = "WaitForGripperOpen"
+            waitTime = sim.getSimulationTime() + 1
+        end
+    elseif state == "WaitForGripperOpen" then
+        if sim.getSimulationTime() >= waitTime then
+            targetConfig = defaultConfig
+            state = "MoveToDefault"
+        end
+    elseif state == "MoveToDefault" then
+        if moveToConfig(targetConfig) then
+            state = "Default"
+            controlGripper("open")
+        end
+    end
+end
+
+function sysCall_cleanup()
+    sim.clearIntegerSignal('GripperBase_gripperClose')
+end
