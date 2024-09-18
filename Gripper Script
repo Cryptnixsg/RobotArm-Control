@@ -1,0 +1,20 @@
+sim=require'sim'
+
+function sysCall_init() 
+    modelBase=sim.getObject(':')
+    modelBaseName=sim.getObjectAlias(modelBase,4)
+    openCloseJoint=sim.getObject('..')
+end
+
+function sysCall_cleanup() 
+ 
+end 
+
+function sysCall_actuation() 
+    v=sim.getInt32Signal(modelBaseName..'_gripperClose')
+    if (v==nil)or(v==0) then
+        sim.setJointTargetVelocity(openCloseJoint,0.07)
+    else
+        sim.setJointTargetVelocity(openCloseJoint,-0.07)
+    end
+end 
